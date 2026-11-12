@@ -3,6 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        try {
+          var originalFetch = typeof window !== 'undefined' && window.fetch ? window.fetch.bind(window) : null;
+          var activeFetch = originalFetch;
+          if (typeof window !== 'undefined') {
+            Object.defineProperty(window, 'fetch', {
+              get: function() {
+                return activeFetch;
+              },
+              set: function(fn) {
+                activeFetch = fn;
+              },
+              configurable: true,
+              enumerable: true
+            });
+            if (typeof Window !== 'undefined' && Window.prototype) {
+              try {
+                Object.defineProperty(Window.prototype, 'fetch', {
+                  get: function() {
+                    return activeFetch;
+                  },
+                  set: function(fn) {
+                    activeFetch = fn;
+                  },
+                  configurable: true,
+                  enumerable: true
+                });
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      })();
+    </script>
     <title>KDP Mastermind: Categories & A+ Studio</title>
     <meta name="description" content="Comprehensive toolkit for Amazon KDP authors to audit and fix category misclassifications, discover low-competition bestseller browse paths, generate KDP support change tickets, and design compliant, high-converting A+ Content with live mobile/desktop preview and compliance scanner." />
     <meta property="og:title" content="KDP Mastermind: Categories & A+ Studio" />

@@ -64,11 +64,18 @@ app.get('/api/browse-nodes', (req, res) => {
 
 // API: Category Audit & Solver
 app.post('/api/audit-categories', async (req, res) => {
-  const input: BookInput = req.body;
-
-  if (!input || !input.title) {
-    return res.status(400).json({ error: 'Book title is required.' });
-  }
+  const safeInput: BookInput = {
+    title: (req.body?.title || '').trim() || 'Untitled Book',
+    subtitle: (req.body?.subtitle || '').trim(),
+    authorName: (req.body?.authorName || '').trim() || 'Author',
+    asinOrIsbn: (req.body?.asinOrIsbn || '').trim(),
+    format: req.body?.format || 'ebook',
+    primaryGenre: (req.body?.primaryGenre || '').trim() || 'Fiction',
+    subgenreTropes: (req.body?.subgenreTropes || '').trim(),
+    blurb: (req.body?.blurb || '').trim(),
+    currentCategories: Array.isArray(req.body?.currentCategories) ? req.body.currentCategories : [],
+    backendKeywords: Array.isArray(req.body?.backendKeywords) ? req.body.backendKeywords : [],
+  };
 
   // If Gemini is available with real key, use gemini-3.8-flash with structured schema
   if (ai && isRealApiKey) {
@@ -77,16 +84,16 @@ app.post('/api/audit-categories', async (req, res) => {
 Audit the following book for Amazon Kindle Direct Publishing (KDP) category selection and backend keyword positioning.
 
 Book Details:
-- Title: ${input.title}
-- Subtitle: ${input.subtitle || 'N/A'}
-- Author: ${input.authorName || 'N/A'}
-- Format: ${input.format || 'ebook'}
-- Primary Genre: ${input.primaryGenre || 'Fiction'}
-- Subgenre & Tropes: ${input.subgenreTropes || 'N/A'}
-- Current Assigned Categories: ${JSON.stringify(input.currentCategories || [])}
-- 7 Backend Keywords: ${JSON.stringify(input.backendKeywords || [])}
+- Title: ${safeInput.title}
+- Subtitle: ${safeInput.subtitle || 'N/A'}
+- Author: ${safeInput.authorName || 'N/A'}
+- Format: ${safeInput.format || 'ebook'}
+- Primary Genre: ${safeInput.primaryGenre || 'Fiction'}
+- Subgenre & Tropes: ${safeInput.subgenreTropes || 'N/A'}
+- Current Assigned Categories: ${JSON.stringify(safeInput.currentCategories || [])}
+- 7 Backend Keywords: ${JSON.stringify(safeInput.backendKeywords || [])}
 - Book Description / Blurb:
-${input.blurb || 'N/A'}
+${safeInput.blurb || 'N/A'}
 
 YOUR MISSION:
 1. Identify 2-3 critical category & metadata issues (e.g. overcompetitive "General" categories, missing sub-nodes, keyword misplacements, or adult filter risks).
@@ -185,17 +192,27 @@ YOUR MISSION:
   }
 
   // Algorithmic heuristic fallback
-  const fallbackResult = generateHeuristicCategoryAudit(input);
+  const fallbackResult = generateHeuristicCategoryAudit(safeInput);
   res.json(fallbackResult);
 });
 
 // API: Generate Compliant A+ Content Campaign
 app.post('/api/generate-aplus', async (req, res) => {
-  const { book, campaignGoal, targetAudience }: { book: BookInput; campaignGoal?: string; targetAudience?: string } = req.body;
-
-  if (!book || !book.title) {
-    return res.status(400).json({ error: 'Book details are required.' });
-  }
+  const rawBook: BookInput = req.body?.book || {};
+  const book: BookInput = {
+    title: (rawBook.title || '').trim() || 'Untitled Book',
+    subtitle: (rawBook.subtitle || '').trim(),
+    authorName: (rawBook.authorName || '').trim() || 'Author',
+    asinOrIsbn: (rawBook.asinOrIsbn || '').trim(),
+    format: rawBook.format || 'ebook',
+    primaryGenre: (rawBook.primaryGenre || '').trim() || 'Fiction',
+    subgenreTropes: (rawBook.subgenreTropes || '').trim(),
+    blurb: (rawBook.blurb || '').trim(),
+    currentCategories: Array.isArray(rawBook.currentCategories) ? rawBook.currentCategories : [],
+    backendKeywords: Array.isArray(rawBook.backendKeywords) ? rawBook.backendKeywords : [],
+  };
+  const campaignGoal = req.body?.campaignGoal;
+  const targetAudience = req.body?.targetAudience;
 
   if (ai && isRealApiKey) {
     try {

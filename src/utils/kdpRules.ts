@@ -205,33 +205,62 @@ export function calculateSalesFromBSR(bsr: number): {
 /**
  * Intelligent algorithmic category audit & matching fallback
  */
-export function generateHeuristicCategoryAudit(input: BookInput): CategoryAuditResult {
-  const genreLower = (input.primaryGenre + ' ' + input.subgenreTropes + ' ' + input.title + ' ' + input.blurb).toLowerCase();
+export function generateHeuristicCategoryAudit(rawInput: BookInput): CategoryAuditResult {
+  const title = (rawInput?.title || 'Untitled Book').trim();
+  const subtitle = (rawInput?.subtitle || '').trim();
+  const authorName = (rawInput?.authorName || 'Author').trim();
+  const asinOrIsbn = (rawInput?.asinOrIsbn || '').trim();
+  const format = rawInput?.format || 'ebook';
+  const primaryGenre = (rawInput?.primaryGenre || 'Fiction').trim();
+  const subgenreTropes = (rawInput?.subgenreTropes || '').trim();
+  const blurb = (rawInput?.blurb || '').trim();
+  const currentCategories = Array.isArray(rawInput?.currentCategories) ? rawInput.currentCategories : [];
+  const rawKeywords = Array.isArray(rawInput?.backendKeywords) ? rawInput.backendKeywords : [];
 
-  // Find best matched browse nodes
-  const matchedNodes = AMAZON_BROWSE_NODES.filter(node => {
-    const nodeText = (node.genre + ' ' + node.fullPath + ' ' + node.notes).toLowerCase();
-    const words = input.primaryGenre.toLowerCase().split(' ');
-    return words.some(w => w.length > 3 && nodeText.includes(w)) || 
-           nodeText.includes(input.primaryGenre.toLowerCase().trim());
+  const combinedSearchText = `${title} ${subtitle} ${primaryGenre} ${subgenreTropes} ${blurb}`.toLowerCase();
+
+  // Score each node based on genre, tropes, and keywords
+  const scoredNodes = AMAZON_BROWSE_NODES.map(node => {
+    let score = 0;
+    const nodeText = `${node.genre} ${node.fullPath} ${node.notes}`.toLowerCase();
+    
+    // Genre match
+    if (node.genre.toLowerCase() === primaryGenre.toLowerCase()) score += 40;
+    else if (nodeText.includes(primaryGenre.toLowerCase())) score += 20;
+
+    // Subgenre / Trope matches
+    const tropeWords = subgenreTropes.toLowerCase().split(/[\s,]+/);
+    for (const tw of tropeWords) {
+      if (tw.length > 3 && nodeText.includes(tw)) score += 15;
+    }
+
+    // Title / Blurb keyword matches
+    const searchWords = ['mafia', 'hockey', 'litrpg', 'cyberpunk', 'space', 'empire', 'ghost', 'cozy', 'culinary', 'animal', 'bear', 'habit', 'focus', 'adhd', 'time', 'dystopian', 'holiday', 'clean'];
+    for (const sw of searchWords) {
+      if (combinedSearchText.includes(sw) && nodeText.includes(sw)) score += 25;
+    }
+
+    return { node, score };
   });
 
-  const candidates = matchedNodes.length > 0 ? matchedNodes : AMAZON_BROWSE_NODES;
+  scoredNodes.sort((a, b) => b.score - a.score);
+  const bestMatches = scoredNodes.map(s => s.node);
+  const candidates = bestMatches.length >= 6 ? bestMatches : AMAZON_BROWSE_NODES;
 
-  // Primary recommendations
+  // Primary recommendations (top 3)
   const primaryRecommendations = candidates.slice(0, 3).map((node, idx) => ({
     path: node.fullPath,
     nodeId: node.id,
     competitionLevel: node.difficulty,
     estimatedBSRForTop1: node.estBSRTop1,
     dailySalesNeeded: node.estSalesPerDay,
-    relevanceScore: 95 - idx * 4,
-    whyRecommended: `Matches your primary genre (${input.primaryGenre}) with ${node.difficulty.toLowerCase()} competition barrier. ${node.notes}`,
-    bisacMatch: `${input.primaryGenre.toUpperCase()} / ${node.genre}`
+    relevanceScore: Math.max(78, 98 - idx * 5),
+    whyRecommended: `Matches your primary genre (${primaryGenre}) and tropes with ${node.difficulty.toLowerCase()} competition barrier. ${node.notes}`,
+    bisacMatch: `${primaryGenre.toUpperCase()} / ${node.genre}`
   }));
 
-  // Ghost micro-niches
-  const ghostCategories = candidates.slice(3, 6).concat(AMAZON_BROWSE_NODES.slice(0, 3)).slice(0, 3).map(node => ({
+  // Ghost micro-niches (next 3)
+  const ghostCategories = candidates.slice(3, 6).map(node => ({
     path: node.fullPath,
     estimatedBSRForTop1: node.estBSRTop1,
     dailySalesNeeded: node.estSalesPerDay,
@@ -240,72 +269,86 @@ export function generateHeuristicCategoryAudit(input: BookInput): CategoryAuditR
   }));
 
   // Identify issues
-  const identifiedIssues = [];
-  if (input.currentCategories.length < 3) {
+  const identifiedIssues: CategoryAuditResult['identifiedIssues'] = [];
+  if (currentCategories.length < 3) {
     identifiedIssues.push({
-      severity: 'warning' as const,
-      title: 'Under-utilized Category Slots (Less than 3 Selected)',
-      description: `You only have ${input.currentCategories.length} category active. Amazon now allows up to 3 official categories directly in the KDP Bookshelf.`,
-      fixAction: 'Add a 3rd high-relevance niche category to gain extra visibility in Amazon browse nodes.'
+      severity: 'warning',
+      title: `Under-utilized Category Slots (${currentCategories.length}/3 Assigned)`,
+      description: `You only have ${currentCategories.length} category active. Amazon now allows up to 3 official categories directly in the KDP Bookshelf.`,
+      fixAction: 'Add a 3rd high-relevance niche category to maximize discovery in Amazon browse trees.'
     });
   }
 
-  const hasGeneric = input.currentCategories.some(c => c.toLowerCase().includes('general'));
+  const hasGeneric = currentCategories.some(c => typeof c === 'string' && c.toLowerCase().includes('general'));
   if (hasGeneric) {
     identifiedIssues.push({
-      severity: 'danger' as const,
+      severity: 'danger',
       title: 'High-Competition "General" Category Trap Detected',
       description: 'One or more of your active categories is a top-level General category where you compete against thousands of established titles.',
       fixAction: 'Swap out "General" for deep subcategories where top rank requires under 25 daily sales.'
     });
   }
 
-  // Check backend keywords for risky keywords
-  const keywordAudit = (input.backendKeywords.length > 0 ? input.backendKeywords : [
-    'bestselling fiction', 'kindle unlimited romance', 'page turner thriller',
-    'must read books', 'free ebooks', 'new release 2024', 'top rated'
-  ]).map((kw, i) => {
-    const kwLower = kw.toLowerCase();
-    if (kwLower.includes('free') || kwLower.includes('bestseller') || kwLower.includes('new release') || kwLower.includes('kindle unlimited')) {
+  // Check for risky keywords in current keywords
+  const backendKeywords = rawKeywords.length > 0 ? rawKeywords : [
+    `${primaryGenre.toLowerCase()} novels`,
+    `${subgenreTropes.split(',')[0] || 'fiction'} books`,
+    'page turner fiction'
+  ];
+
+  const keywordAudit = backendKeywords.map((kw) => {
+    const safeKw = typeof kw === 'string' ? kw.trim() : '';
+    const kwLower = safeKw.toLowerCase();
+
+    if (!safeKw) {
       return {
-        original: kw,
-        status: 'Risk' as const,
-        recommendedKeyword: `${input.primaryGenre.toLowerCase()} ${input.subgenreTropes.split(',')[0] || 'novel'} series`,
-        reason: 'Amazon terms of service explicitly ban keywords like "free", "bestseller", or "kindle unlimited" in backend slots. It wastes index capacity.'
-      };
-    }
-    if (kwLower.split(' ').length < 2) {
-      return {
-        original: kw,
+        original: '[Empty Slot]',
         status: 'Replace' as const,
-        recommendedKeyword: `${kw} for readers of ${input.primaryGenre}`,
-        reason: 'Single-word keywords are too broad. Use multi-word long-tail reader phrases.'
+        recommendedKeyword: `${primaryGenre.toLowerCase()} reader favorites`,
+        reason: 'Empty backend keyword slot wastes Amazon indexing potential.'
       };
     }
+
+    if (kwLower.includes('free') || kwLower.includes('bestseller') || kwLower.includes('new release') || kwLower.includes('kindle unlimited') || kwLower.includes('discount')) {
+      return {
+        original: safeKw,
+        status: 'Risk' as const,
+        recommendedKeyword: `${primaryGenre.toLowerCase()} ${subgenreTropes.split(',')[0] || 'novel'} series`,
+        reason: 'Amazon terms of service explicitly prohibit keywords like "free", "bestseller", or "kindle unlimited" in backend slots. It wastes index capacity.'
+      };
+    }
+
+    if (safeKw.split(/\s+/).length < 2) {
+      return {
+        original: safeKw,
+        status: 'Replace' as const,
+        recommendedKeyword: `${safeKw} ${primaryGenre.toLowerCase()} series`,
+        reason: 'Single-word keywords are too broad. Use multi-word long-tail reader search phrases.'
+      };
+    }
+
     return {
-      original: kw,
+      original: safeKw,
       status: 'Keep' as const,
-      recommendedKeyword: kw,
+      recommendedKeyword: safeKw,
       reason: 'Strong long-tail keyword with clear buyer search intent.'
     };
   });
 
   // Ticket Generator
   const supportTicket = {
-    subject: `KDP Category Update Request - ASIN: ${input.asinOrIsbn || 'Pending'}`,
+    subject: `KDP Category Update Request - ASIN: ${asinOrIsbn || 'Pending'}`,
     body: `Hello KDP Author Support Team,
 
 I would like to update the category assignments for my title to ensure it appears in the most relevant browse nodes for readers.
 
-Title: ${input.title}${input.subtitle ? ': ' + input.subtitle : ''}
-Author: ${input.authorName || 'Author'}
-ASIN / ISBN: ${input.asinOrIsbn || '[ENTER YOUR ASIN/ISBN HERE]'}
+Title: ${title}${subtitle ? ': ' + subtitle : ''}
+Author: ${authorName}
+ASIN / ISBN: ${asinOrIsbn || '[ENTER YOUR ASIN/ISBN HERE]'}
 Marketplace: Amazon.com (US)
-Format: ${input.format === 'ebook' ? 'Kindle eBook' : input.format === 'paperback' ? 'Paperback' : 'Hardcover'}
+Format: ${format === 'ebook' ? 'Kindle eBook' : format === 'paperback' ? 'Paperback' : 'Hardcover'}
 
-Please REMOVE the following outdated / broad categories:
-${input.currentCategories.map(c => `- ${c}`).join('\n')}
-
+${currentCategories.length > 0 ? `Please REMOVE the following outdated / broad categories:\n${currentCategories.map(c => `- ${c}`).join('\n')}\n` : ''}
 Please ADD the following 3 targeted categories:
 1. ${primaryRecommendations[0]?.path || 'Books > Fiction'}
 2. ${primaryRecommendations[1]?.path || 'Books > Genre Fiction'}
@@ -314,7 +357,7 @@ Please ADD the following 3 targeted categories:
 Thank you for your assistance with updating my book's catalog placement.
 
 Warm regards,
-${input.authorName || 'Author'}`
+${authorName}`
   };
 
   return {
@@ -323,6 +366,6 @@ ${input.authorName || 'Author'}`
     ghostCategories,
     keywordAudit,
     supportTicket,
-    summaryVerdict: `Audited ${input.title}: Identified key opportunities to transition from crowded general categories into targeted micro-niches with realistic #1 BSR targets.`
+    summaryVerdict: `Audited "${title}": Identified high-converting browse nodes to transition away from crowded general categories into targeted micro-niches with achievable #1 BSR milestones.`
   };
 }
