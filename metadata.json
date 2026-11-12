@@ -1,0 +1,6 @@
+{
+  "name": "KDP Mastermind: Categories & A+ Studio",
+  "description": "Comprehensive toolkit for Amazon KDP authors to audit and fix category misclassifications, discover low-competition bestseller browse paths, generate KDP support change tickets, and design compliant, high-converting A+ Content with live mobile/desktop preview and compliance scanner.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
